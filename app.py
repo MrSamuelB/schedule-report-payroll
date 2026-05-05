@@ -7,6 +7,8 @@ import urllib.request
 import threading
 import os
 import sys
+import ssl
+import certifi
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -30,6 +32,16 @@ def get_download_url():
     if sys.platform == "win32":
         return DOWNLOAD_URL_WIN
     return DOWNLOAD_URL_MAC
+
+def get_ssl_context():
+    try:
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        return ctx
+    except Exception:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
 
 # ── Rules ─────────────────────────────────────────────────
 COLUMNS_TO_DELETE = [
@@ -71,6 +83,9 @@ def download_and_relaunch():
     try:
         download_url = get_download_url()
         current_exe = sys.executable
+        ctx = get_ssl_context()
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        urllib.request.install_opener(opener)
 
         if sys.platform == "win32":
             new_exe = current_exe + ".new"
@@ -89,7 +104,7 @@ del "%~f0"
 
         else:
             import subprocess
-            dmg_path = os.path.expanduser("~/Downloads/ScheduleReportForPayroll_update.dmg")
+            dmg_path = os.path.expanduser("~/Downloads/ScheduleReport_update.dmg")
             urllib.request.urlretrieve(download_url, dmg_path)
             result = subprocess.run(
                 ["hdiutil", "attach", dmg_path, "-nobrowse", "-quiet"],
@@ -97,14 +112,14 @@ del "%~f0"
             )
             mount_point = None
             for line in result.stdout.splitlines():
-                if "ScheduleReportForPayroll" in line:
+                if "Schedule Report" in line:
                     parts = line.split("\t")
                     if len(parts) >= 3:
                         mount_point = parts[-1].strip()
                         break
             if mount_point:
-                app_src = os.path.join(mount_point, "ScheduleReportForPayroll.app")
-                app_dst = "/Applications/ScheduleReportForPayroll.app"
+                app_src = os.path.join(mount_point, "Schedule Report.app")
+                app_dst = "/Applications/Schedule Report.app"
                 subprocess.run(["cp", "-R", app_src, app_dst])
                 subprocess.run(["hdiutil", "detach", mount_point, "-quiet"])
                 subprocess.Popen(["open", app_dst])
@@ -117,7 +132,8 @@ del "%~f0"
 
 def check_for_updates():
     try:
-        with urllib.request.urlopen(VERSION_URL, timeout=5) as response:
+        ctx = get_ssl_context()
+        with urllib.request.urlopen(VERSION_URL, timeout=5, context=ctx) as response:
             latest_version = response.read().decode("utf-8").strip()
 
         if latest_version != CURRENT_VERSION:
