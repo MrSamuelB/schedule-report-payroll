@@ -15,7 +15,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # ── Version ───────────────────────────────────────────────
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.0.1"
 VERSION_URL = "https://raw.githubusercontent.com/MrSamuelB/schedule-report-payroll/refs/heads/main/version.txt"
 UPDATE_URL = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest"
 
