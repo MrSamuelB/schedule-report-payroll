@@ -1,6 +1,11 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image as PILImage
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    DND_AVAILABLE = True
+except Exception:
+    DND_AVAILABLE = False
 import openpyxl
 from openpyxl.styles import PatternFill, Font
 import urllib.request
@@ -30,7 +35,7 @@ COLUMNS_TO_DELETE = [
 TASK_NAMES_TO_DELETE = [
     "30-day summary", "additional hospital records", "admit summary",
     "case conference and 60 day summary", "cms 485", "consent", "cota sup",
-    "pta sup", "lpn sup", "discharge summary", "discharge", "dnr", "dpa",
+    "pta sup", "lpn sup", "discharge summary", "dnr", "dpa",
     "dpoa", "emergency plan", "follow up vpoc", "f/up vpoc", "f2f encounter",
     "f2f notes", "frequency order", "hospitalization", "insurance payment",
     "insurance verification", "lab results", "medication profile",
@@ -115,13 +120,24 @@ def process_data(ws):
             for col_idx, value in enumerate(row_data, start=1):
                 ws.cell(row=row_idx, column=col_idx, value=value)
 
-# Step 4: Delete rows where Task Name matches list or contains "order"
+    # Step 4: Delete rows where Task Name matches list, contains "order", or contains "discharge summary"
     task_name_idx = get_col_index(ws, "Task Name")
     if task_name_idx:
         rows_to_delete = []
         for row in ws.iter_rows(min_row=2):
             cell_value = str(row[task_name_idx - 1].value or "").strip().lower()
-            if cell_value in TASK_NAMES_TO_DELETE or "order" in cell_value:
+            if cell_value in TASK_NAMES_TO_DELETE or "order" in cell_value or "discharge summary" in cell_value:
+                rows_to_delete.append(row[0].row)
+        for row_idx in sorted(rows_to_delete, reverse=True):
+            ws.delete_rows(row_idx)
+
+# Step 5a: Delete rows where Provider Last is "Williams" or "Morales"
+    provider_last_idx = get_col_index(ws, "Provider Last")
+    if provider_last_idx:
+        rows_to_delete = []
+        for row in ws.iter_rows(min_row=2):
+            cell_value = str(row[provider_last_idx - 1].value or "").strip().lower()
+            if cell_value in ["williams", "morales"]:
                 rows_to_delete.append(row[0].row)
         for row_idx in sorted(rows_to_delete, reverse=True):
             ws.delete_rows(row_idx)
@@ -338,9 +354,16 @@ def upload_file():
     )
 
 # ── Build UI ──────────────────────────────────────────────
-app = ctk.CTk()
-app.title("Schedule Report For Payroll")
-app.geometry("800x600")
+if DND_AVAILABLE:
+    app = TkinterDnD.Tk()
+    app.title("Schedule Report For Payroll")
+    app.geometry("800x600")
+    ctk.set_appearance_mode("System")
+    ctk.set_default_color_theme("blue")
+else:
+    app = ctk.CTk()
+    app.title("Schedule Report For Payroll")
+    app.geometry("800x600")
 
 if os.path.exists(LOGO_PATH):
     pil_image = PILImage.open(LOGO_PATH)
@@ -378,6 +401,100 @@ upload_btn = ctk.CTkButton(
     width=250,
     command=upload_file
 )
+upload_btn.pack(pady=20)
+
+# Drop zone
+drop_zone = ctk.CTkLabel(
+    app,
+    text="or drag and drop your Excel file here",
+    font=ctk.CTkFont(size=13),
+    text_color="gray",
+    fg_color=("gray90", "gray20"),
+    corner_radius=10,
+    width=400,
+    height=60
+)
+drop_zone.pack(pady=(0, 10))
+
+def on_drag_enter(e):
+    drop_zone.configure(fg_color=("gray80", "gray30"))
+
+def on_drag_leave(e):
+    drop_zone.configure(fg_color=("gray90", "gray20"))
+
+def on_drop(e):
+    drop_zone.configure(fg_color=("gray90", "gray20"))
+    file_path = e.data.strip().strip('{}')
+    if file_path.endswith(('.xlsx', '.xls')):
+        process_dropped_file(file_path)
+    else:
+        status_label.configure(text="Please drop an Excel file (.xlsx or .xls)")
+
+def process_dropped_file(file_path):
+    status_label.configure(text="Loading file...")
+    app.update()
+
+    workbook = openpyxl.load_workbook(file_path)
+    ws = workbook.active
+
+    row_count = ws.max_row - 1
+    col_count = ws.max_column
+    status_label.configure(
+        text=f"Loaded: {row_count} rows, {col_count} columns. Processing..."
+    )
+    app.update()
+
+    status_label.configure(text="Applying rules...")
+    app.update()
+    ws = process_data(ws)
+
+    clean_pdf_path = filedialog.asksaveasfilename(
+        title="Save PDF as",
+        defaultextension=".pdf",
+        filetypes=[("PDF files", "*.pdf")],
+        initialfile="schedule_report.pdf"
+    )
+    if clean_pdf_path:
+        status_label.configure(text="Generating PDF...")
+        app.update()
+        generate_pdf(ws, clean_pdf_path)
+
+    excel_path = filedialog.asksaveasfilename(
+        title="Save Excel file as",
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        initialfile="schedule_report.xlsx"
+    )
+    if excel_path:
+        status_label.configure(text="Saving Excel file...")
+        app.update()
+        workbook.save(excel_path)
+
+    status_label.configure(
+        text=f"All done! Rows in final report: {ws.max_row - 1}"
+    )
+
+if DND_AVAILABLE:
+    drop_zone.drop_target_register(DND_FILES)
+    drop_zone.dnd_bind('<<DropEnter>>', on_drag_enter)
+    drop_zone.dnd_bind('<<DropLeave>>', on_drag_leave)
+    drop_zone.dnd_bind('<<Drop>>', on_drop)
+upload_btn.pack(pady=20)
+
+# Drag and drop support
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    app.drop_target_register(DND_FILES)
+    app.dnd_bind('<<Drop>>', lambda e: handle_drop(e.data))
+except Exception:
+    pass
+
+def handle_drop(data):
+    file_path = data.strip().strip('{}')
+    if file_path.endswith(('.xlsx', '.xls')):
+        process_file(file_path)
+    else:
+        status_label.configure(text="Please drop an Excel file (.xlsx or .xls)")
 upload_btn.pack(pady=20)
 
 status_label = ctk.CTkLabel(
