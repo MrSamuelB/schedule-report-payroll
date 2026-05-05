@@ -15,7 +15,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # ── Version ───────────────────────────────────────────────
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.0.2"
 VERSION_URL = "https://raw.githubusercontent.com/MrSamuelB/schedule-report-payroll/refs/heads/main/version.txt"
 UPDATE_URL = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest"
 
@@ -30,13 +30,15 @@ COLUMNS_TO_DELETE = [
 TASK_NAMES_TO_DELETE = [
     "30-day summary", "additional hospital records", "admit summary",
     "case conference and 60 day summary", "cms 485", "consent", "cota sup",
-    "pta sup", "lpn sup", "discharge summary", "dnr", "dpa", "emergency plan",
-    "follow up vpoc", "f2f encounter", "f2f notes", "frequency order",
-    "hospitalization", "insurance payment", "insurance verification",
-    "lab results", "medication profile", "msw communication", "nomnc",
-    "otcomm", "ovn", "patient communication", "physician order", "ptcomm",
+    "pta sup", "lpn sup", "discharge summary", "discharge", "dnr", "dpa",
+    "dpoa", "emergency plan", "follow up vpoc", "f/up vpoc", "f2f encounter",
+    "f2f notes", "frequency order", "hospitalization", "insurance payment",
+    "insurance verification", "lab results", "medication profile",
+    "msw communication", "msw comm", "nomnc", "otcomm", "ot comm", "ovn",
+    "patient communication", "physician order", "ptcomm", "pt comm",
     "referral approval", "referral", "release of information form", "orc",
-    "rocdocs", "soc email", "transfer summary", "wound company ovn"
+    "roc", "roc docs", "rocdocs", "soc email", "transfer summary",
+    "wound company ovn"
 ]
 
 STATUS_HIGHLIGHT = ["not started", "saved"]
