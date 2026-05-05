@@ -1,0 +1,31 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install customtkinter openpyxl reportlab pillow pyinstaller
+
+    - name: Build EXE
+      run: |
+        pyinstaller --windowed --noconsole --add-data "Logo.png;." --icon "Logo.png" --name "ScheduleReportForPayroll" app.py
+
+    - name: Upload EXE
+      uses: actions/upload-artifact@v3
+      with:
+        name: ScheduleReportForPayroll-Windows
+        path: dist/ScheduleReportForPayroll/
