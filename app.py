@@ -20,7 +20,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # ── Version ───────────────────────────────────────────────
-CURRENT_VERSION = "1.0.3"
+CURRENT_VERSION = "1.0.4"
 VERSION_URL = "https://raw.githubusercontent.com/MrSamuelB/schedule-report-payroll/refs/heads/main/version.txt"
 UPDATE_URL = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest"
 
@@ -28,13 +28,13 @@ UPDATE_URL = "https://github.com/MrSamuelB/schedule-report-payroll/releases/late
 COLUMNS_TO_DELETE = [
     "medical record number", "branch name", "phone", "task type",
     "address", "city", "state", "zip code", "employee id",
-    "time in", "time out", "documentation time", "travel time",
-    "insurance", "productivity units"
+    "time in", "time out", "documentation time", "documentation time (min)",
+    "travel time", "travel time (min)", "insurance", "productivity units"
 ]
 
 TASK_NAMES_TO_DELETE = [
     "30-day summary", "additional hospital records", "admit summary",
-    "case conference and 60 day summary", "cms 485", "consent", "cota sup",
+    "case conference and 60 day summary", "cms 485", "cms 486", "consent", "cota sup",
     "pta sup", "lpn sup", "discharge summary", "dnr", "dpa",
     "dpoa", "emergency plan", "follow up vpoc", "f/up vpoc", "f2f encounter",
     "f2f notes", "frequency order", "hospitalization", "insurance payment",
@@ -183,7 +183,19 @@ def generate_pdf(ws, save_path):
             break
 
     col_count = len(headers)
-    col_widths = [usable_width / col_count] * col_count
+    task_col_idx = None
+    for i, h in enumerate(headers):
+        if h.strip().lower() == "task name":
+            task_col_idx = i
+            break
+
+    small_col_width = 0.8 * inch
+    if task_col_idx is not None:
+        remaining = usable_width - (small_col_width * (col_count - 1))
+        col_widths = [small_col_width] * col_count
+        col_widths[task_col_idx] = remaining
+    else:
+        col_widths = [usable_width / col_count] * col_count
 
     # Styles
     normal_style = ParagraphStyle(
