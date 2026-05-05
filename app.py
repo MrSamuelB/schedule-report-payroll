@@ -1,28 +1,35 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image as PILImage
-try:
-    from tkinterdnd2 import TkinterDnD, DND_FILES
-    DND_AVAILABLE = True
-except Exception:
-    DND_AVAILABLE = False
 import openpyxl
 from openpyxl.styles import PatternFill, Font
 import urllib.request
 import threading
 import os
 import sys
+from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Image as RLImage, Paragraph
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    DND_AVAILABLE = True
+except Exception:
+    DND_AVAILABLE = False
 
 # ── Version ───────────────────────────────────────────────
-CURRENT_VERSION = "1.0.4"
+CURRENT_VERSION = "1.0.6"
 VERSION_URL = "https://raw.githubusercontent.com/MrSamuelB/schedule-report-payroll/refs/heads/main/version.txt"
-UPDATE_URL = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest"
+DOWNLOAD_URL_WIN = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll.exe"
+DOWNLOAD_URL_MAC = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll.dmg"
+
+def get_download_url():
+    if sys.platform == "win32":
+        return DOWNLOAD_URL_WIN
+    return DOWNLOAD_URL_MAC
 
 # ── Rules ─────────────────────────────────────────────────
 COLUMNS_TO_DELETE = [
@@ -43,7 +50,7 @@ TASK_NAMES_TO_DELETE = [
     "patient communication", "physician order", "ptcomm", "pt comm",
     "referral approval", "referral", "release of information form", "orc",
     "roc", "roc docs", "rocdocs", "soc email", "transfer summary",
-    "wound company ovn"
+    "wound company ovn", "aide care plan"
 ]
 
 STATUS_HIGHLIGHT = ["not started", "saved"]
@@ -60,20 +67,97 @@ def resource_path(filename):
 LOGO_PATH = resource_path("Logo.png")
 
 # ── Auto-update ───────────────────────────────────────────
+def download_and_relaunch():
+    try:
+        download_url = get_download_url()
+        current_exe = sys.executable
+
+        if sys.platform == "win32":
+            new_exe = current_exe + ".new"
+            urllib.request.urlretrieve(download_url, new_exe)
+            batch = os.path.join(os.path.dirname(current_exe), "update.bat")
+            with open(batch, "w") as f:
+                f.write(f"""@echo off
+timeout /t 2 /nobreak
+move /y "{new_exe}" "{current_exe}"
+start "" "{current_exe}"
+del "%~f0"
+""")
+            import subprocess
+            subprocess.Popen(["cmd", "/c", batch], creationflags=0x08000000)
+            app.quit()
+
+        else:
+            import subprocess
+            dmg_path = os.path.expanduser("~/Downloads/ScheduleReportForPayroll_update.dmg")
+            urllib.request.urlretrieve(download_url, dmg_path)
+            result = subprocess.run(
+                ["hdiutil", "attach", dmg_path, "-nobrowse", "-quiet"],
+                capture_output=True, text=True
+            )
+            mount_point = None
+            for line in result.stdout.splitlines():
+                if "ScheduleReportForPayroll" in line:
+                    parts = line.split("\t")
+                    if len(parts) >= 3:
+                        mount_point = parts[-1].strip()
+                        break
+            if mount_point:
+                app_src = os.path.join(mount_point, "ScheduleReportForPayroll.app")
+                app_dst = "/Applications/ScheduleReportForPayroll.app"
+                subprocess.run(["cp", "-R", app_src, app_dst])
+                subprocess.run(["hdiutil", "detach", mount_point, "-quiet"])
+                subprocess.Popen(["open", app_dst])
+                app.quit()
+
+    except Exception:
+        app.after(0, lambda: status_label.configure(
+            text="Update failed. Please download manually."
+        ))
+
 def check_for_updates():
     try:
         with urllib.request.urlopen(VERSION_URL, timeout=5) as response:
             latest_version = response.read().decode("utf-8").strip()
+
         if latest_version != CURRENT_VERSION:
-            answer = messagebox.askyesno(
-                "Update Available",
-                f"A new version is available ({latest_version}).\n\n"
-                f"You are on version {CURRENT_VERSION}.\n\n"
-                "Would you like to go to the download page?"
-            )
-            if answer:
-                import webbrowser
-                webbrowser.open(UPDATE_URL)
+            def show_update_popup():
+                update_win = ctk.CTkToplevel(app)
+                update_win.title("Update Available")
+                update_win.geometry("400x200")
+                update_win.resizable(False, False)
+                update_win.grab_set()
+
+                ctk.CTkLabel(
+                    update_win,
+                    text="A new version is available!",
+                    font=ctk.CTkFont(size=16, weight="bold")
+                ).pack(pady=(30, 5))
+
+                ctk.CTkLabel(
+                    update_win,
+                    text=f"Version {latest_version} is ready to download.\nClick below to update.",
+                    font=ctk.CTkFont(size=13),
+                    text_color="gray"
+                ).pack(pady=5)
+
+                def do_update():
+                    update_win.destroy()
+                    status_label.configure(text="Downloading update, please wait...")
+                    app.update()
+                    threading.Thread(target=download_and_relaunch, daemon=True).start()
+
+                ctk.CTkButton(
+                    update_win,
+                    text="Continue to Download",
+                    font=ctk.CTkFont(size=14),
+                    height=45,
+                    width=220,
+                    command=do_update
+                ).pack(pady=20)
+
+            app.after(0, show_update_popup)
+
     except Exception:
         pass
 
@@ -95,6 +179,21 @@ def move_column_to(ws, from_idx, to_idx):
 
 # ── Process data ──────────────────────────────────────────
 def process_data(ws):
+    # Step 0: Sort by Target Date (column A) chronologically
+    target_date_idx = get_col_index(ws, "Target Date")
+    if target_date_idx:
+        data_rows = [list(row) for row in ws.iter_rows(min_row=2, values_only=True)]
+        def parse_date(row):
+            val = str(row[target_date_idx - 1] or "").strip()
+            try:
+                return datetime.strptime(val, "%m/%d/%Y")
+            except:
+                return datetime.max
+        data_rows.sort(key=parse_date)
+        for row_idx, row_data in enumerate(data_rows, start=2):
+            for col_idx, value in enumerate(row_data, start=1):
+                ws.cell(row=row_idx, column=col_idx, value=value)
+
     # Step 1: Delete specified columns
     cols_to_remove = []
     for col_idx, cell in enumerate(ws[1], start=1):
@@ -131,7 +230,7 @@ def process_data(ws):
         for row_idx in sorted(rows_to_delete, reverse=True):
             ws.delete_rows(row_idx)
 
-# Step 5a: Delete rows where Provider Last is "Williams" or "Morales"
+    # Step 5a: Delete rows where Provider Last is "Williams" or "Morales"
     provider_last_idx = get_col_index(ws, "Provider Last")
     if provider_last_idx:
         rows_to_delete = []
@@ -142,9 +241,7 @@ def process_data(ws):
         for row_idx in sorted(rows_to_delete, reverse=True):
             ws.delete_rows(row_idx)
 
-    # Step 5: Handle Status column
-    # - Delete rows containing "MV" anywhere in status
-    # - Red text for "Not Started" or "Saved" (never delete these)
+    # Step 5b: Handle Status column
     status_idx = get_col_index(ws, "Status")
     if status_idx:
         rows_to_delete = []
@@ -162,7 +259,7 @@ def process_data(ws):
     return ws
 
 # ── PDF generation ────────────────────────────────────────
-def generate_pdf(ws, save_path):
+def generate_pdf(ws, save_path, date_range=""):
     pagesize = letter
     page_width, page_height = pagesize
     margin = 0.5 * inch
@@ -182,6 +279,7 @@ def generate_pdf(ws, save_path):
             status_col_idx = i
             break
 
+    # Calculate column widths — Task Name gets as much space as possible
     col_count = len(headers)
     task_col_idx = None
     for i, h in enumerate(headers):
@@ -211,7 +309,7 @@ def generate_pdf(ws, save_path):
     )
     title_style = ParagraphStyle(
         "title", fontName="Helvetica-Bold", fontSize=14,
-        leading=18, alignment=TA_CENTER
+        leading=20, alignment=TA_CENTER
     )
     summary_label_style = ParagraphStyle(
         "sum_label", fontName="Helvetica-Bold", fontSize=10,
@@ -294,7 +392,10 @@ def generate_pdf(ws, save_path):
         elements.append(logo)
 
     elements.append(Spacer(1, 0.05*inch))
-    elements.append(Paragraph("Schedule Report for Payroll", title_style))
+    title_text = "Schedule Report for Payroll"
+    if date_range:
+        title_text += f"<br/><font size=11>Schedule from {date_range}</font>"
+    elements.append(Paragraph(title_text, title_style))
     elements.append(Spacer(1, 0.15*inch))
     elements.append(table)
     elements.append(Spacer(1, 0.2*inch))
@@ -311,14 +412,7 @@ def generate_pdf(ws, save_path):
     doc.build(elements)
 
 # ── Upload & process ──────────────────────────────────────
-def upload_file():
-    file_path = filedialog.askopenfilename(
-        title="Select your schedule file",
-        filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
-    )
-    if not file_path:
-        return
-
+def process_and_export(file_path):
     status_label.configure(text="Loading file...")
     app.update()
 
@@ -332,29 +426,45 @@ def upload_file():
     )
     app.update()
 
-    # Apply all rules
     status_label.configure(text="Applying rules...")
     app.update()
     ws = process_data(ws)
+
+    # Get date range from Target Date column for PDF title and filename
+    dates = []
+    target_date_idx = get_col_index(ws, "Target Date")
+    if target_date_idx:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            val = str(row[target_date_idx - 1] or "").strip()
+            try:
+                dates.append(datetime.strptime(val, "%m/%d/%Y"))
+            except:
+                pass
+    if dates:
+        date_range = f"{min(dates).strftime('%m/%d/%Y')} to {max(dates).strftime('%m/%d/%Y')}"
+        filename = f"Schedule Report for {min(dates).strftime('%m/%d/%Y')} - {max(dates).strftime('%m/%d/%Y')}"
+    else:
+        date_range = ""
+        filename = "schedule_report"
 
     # Save PDF
     clean_pdf_path = filedialog.asksaveasfilename(
         title="Save PDF as",
         defaultextension=".pdf",
         filetypes=[("PDF files", "*.pdf")],
-        initialfile="schedule_report.pdf"
+        initialfile=f"{filename}.pdf"
     )
     if clean_pdf_path:
         status_label.configure(text="Generating PDF...")
         app.update()
-        generate_pdf(ws, clean_pdf_path)
+        generate_pdf(ws, clean_pdf_path, date_range)
 
     # Save Excel
     excel_path = filedialog.asksaveasfilename(
         title="Save Excel file as",
         defaultextension=".xlsx",
         filetypes=[("Excel files", "*.xlsx")],
-        initialfile="schedule_report.xlsx"
+        initialfile=f"{filename}.xlsx"
     )
     if excel_path:
         status_label.configure(text="Saving Excel file...")
@@ -364,6 +474,29 @@ def upload_file():
     status_label.configure(
         text=f"All done! Rows in final report: {ws.max_row - 1}"
     )
+
+def upload_file():
+    file_path = filedialog.askopenfilename(
+        title="Select your schedule file",
+        filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+    )
+    if not file_path:
+        return
+    process_and_export(file_path)
+
+def on_drag_enter(e):
+    drop_zone.configure(fg_color=("gray80", "gray30"))
+
+def on_drag_leave(e):
+    drop_zone.configure(fg_color=("gray90", "gray20"))
+
+def on_drop(e):
+    drop_zone.configure(fg_color=("gray90", "gray20"))
+    file_path = e.data.strip().strip('{}')
+    if file_path.endswith(('.xlsx', '.xls')):
+        process_and_export(file_path)
+    else:
+        status_label.configure(text="Please drop an Excel file (.xlsx or .xls)")
 
 # ── Build UI ──────────────────────────────────────────────
 if DND_AVAILABLE:
@@ -415,99 +548,23 @@ upload_btn = ctk.CTkButton(
 )
 upload_btn.pack(pady=20)
 
-# Drop zone
 drop_zone = ctk.CTkLabel(
     app,
     text="or drag and drop your Excel file here",
-    font=ctk.CTkFont(size=13),
+    font=ctk.CTkFont(size=15),
     text_color="gray",
     fg_color=("gray90", "gray20"),
     corner_radius=10,
-    width=400,
-    height=60
+    width=500,
+    height=120
 )
 drop_zone.pack(pady=(0, 10))
-
-def on_drag_enter(e):
-    drop_zone.configure(fg_color=("gray80", "gray30"))
-
-def on_drag_leave(e):
-    drop_zone.configure(fg_color=("gray90", "gray20"))
-
-def on_drop(e):
-    drop_zone.configure(fg_color=("gray90", "gray20"))
-    file_path = e.data.strip().strip('{}')
-    if file_path.endswith(('.xlsx', '.xls')):
-        process_dropped_file(file_path)
-    else:
-        status_label.configure(text="Please drop an Excel file (.xlsx or .xls)")
-
-def process_dropped_file(file_path):
-    status_label.configure(text="Loading file...")
-    app.update()
-
-    workbook = openpyxl.load_workbook(file_path)
-    ws = workbook.active
-
-    row_count = ws.max_row - 1
-    col_count = ws.max_column
-    status_label.configure(
-        text=f"Loaded: {row_count} rows, {col_count} columns. Processing..."
-    )
-    app.update()
-
-    status_label.configure(text="Applying rules...")
-    app.update()
-    ws = process_data(ws)
-
-    clean_pdf_path = filedialog.asksaveasfilename(
-        title="Save PDF as",
-        defaultextension=".pdf",
-        filetypes=[("PDF files", "*.pdf")],
-        initialfile="schedule_report.pdf"
-    )
-    if clean_pdf_path:
-        status_label.configure(text="Generating PDF...")
-        app.update()
-        generate_pdf(ws, clean_pdf_path)
-
-    excel_path = filedialog.asksaveasfilename(
-        title="Save Excel file as",
-        defaultextension=".xlsx",
-        filetypes=[("Excel files", "*.xlsx")],
-        initialfile="schedule_report.xlsx"
-    )
-    if excel_path:
-        status_label.configure(text="Saving Excel file...")
-        app.update()
-        workbook.save(excel_path)
-
-    status_label.configure(
-        text=f"All done! Rows in final report: {ws.max_row - 1}"
-    )
 
 if DND_AVAILABLE:
     drop_zone.drop_target_register(DND_FILES)
     drop_zone.dnd_bind('<<DropEnter>>', on_drag_enter)
     drop_zone.dnd_bind('<<DropLeave>>', on_drag_leave)
     drop_zone.dnd_bind('<<Drop>>', on_drop)
-upload_btn.pack(pady=20)
-
-# Drag and drop support
-try:
-    from tkinterdnd2 import DND_FILES, TkinterDnD
-    app.drop_target_register(DND_FILES)
-    app.dnd_bind('<<Drop>>', lambda e: handle_drop(e.data))
-except Exception:
-    pass
-
-def handle_drop(data):
-    file_path = data.strip().strip('{}')
-    if file_path.endswith(('.xlsx', '.xls')):
-        process_file(file_path)
-    else:
-        status_label.configure(text="Please drop an Excel file (.xlsx or .xls)")
-upload_btn.pack(pady=20)
 
 status_label = ctk.CTkLabel(
     app,
@@ -516,14 +573,6 @@ status_label = ctk.CTkLabel(
     text_color="gray"
 )
 status_label.pack(pady=5)
-
-columns_frame = ctk.CTkScrollableFrame(
-    app,
-    width=600,
-    height=150,
-    label_text=""
-)
-columns_frame.pack(pady=10, padx=20, fill="both", expand=True)
 
 threading.Thread(target=check_for_updates, daemon=True).start()
 

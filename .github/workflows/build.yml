@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Mac and Windows
 
 on:
   push:
@@ -22,12 +22,63 @@ jobs:
 
     - name: Build EXE
       run: |
-        pip show tkinterdnd2
         $dndPath = python -c "import tkinterdnd2, os; print(os.path.dirname(tkinterdnd2.__file__))"
-        pyinstaller --onefile --windowed --noconsole --add-data "Logo.png;." --add-data "$dndPath;tkinterdnd2" --name "ScheduleReportForPayroll" app.py
+        pyinstaller --onefile --windowed --noconsole --add-data "Logo.png;." --add-data "$dndPath;tkinterdnd2" --icon "Logo.png" --name "ScheduleReportForPayroll" app.py
 
-    - name: Upload EXE
+    - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
       with:
         name: ScheduleReportForPayroll-Windows
         path: dist/ScheduleReportForPayroll.exe
+
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip install customtkinter openpyxl reportlab pillow pyinstaller tkinterdnd2
+
+    - name: Create Mac icon
+      run: |
+        mkdir -p Logo.iconset
+        sips -z 16 16     Logo.png --out Logo.iconset/icon_16x16.png
+        sips -z 32 32     Logo.png --out Logo.iconset/icon_16x16@2x.png
+        sips -z 32 32     Logo.png --out Logo.iconset/icon_32x32.png
+        sips -z 64 64     Logo.png --out Logo.iconset/icon_32x32@2x.png
+        sips -z 128 128   Logo.png --out Logo.iconset/icon_128x128.png
+        sips -z 256 256   Logo.png --out Logo.iconset/icon_128x128@2x.png
+        sips -z 256 256   Logo.png --out Logo.iconset/icon_256x256.png
+        sips -z 512 512   Logo.png --out Logo.iconset/icon_256x256@2x.png
+        sips -z 512 512   Logo.png --out Logo.iconset/icon_512x512.png
+        iconutil -c icns Logo.iconset -o Logo.icns
+
+    - name: Build Mac app
+      run: |
+        DND_PATH=$(python3 -c "import tkinterdnd2, os; print(os.path.dirname(tkinterdnd2.__file__))")
+        pyinstaller --windowed --noconsole \
+          --add-data "Logo.png:." \
+          --add-data "$DND_PATH:tkinterdnd2" \
+          --osx-bundle-identifier "com.legacyhomehealth.schedulereport" \
+          --icon "Logo.icns" \
+          --name "ScheduleReportForPayroll" app.py
+
+    - name: Create DMG
+      run: |
+        hdiutil create -volname "ScheduleReportForPayroll" \
+          -srcfolder "dist/ScheduleReportForPayroll.app" \
+          -ov -format UDZO \
+          "ScheduleReportForPayroll.dmg"
+
+    - name: Upload DMG artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ScheduleReportForPayroll-Mac
+        path: ScheduleReportForPayroll.dmg
