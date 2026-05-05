@@ -21,10 +21,10 @@ except Exception:
     DND_AVAILABLE = False
 
 # ── Version ───────────────────────────────────────────────
-CURRENT_VERSION = "1.0.6"
+CURRENT_VERSION = "1.0.7"
 VERSION_URL = "https://raw.githubusercontent.com/MrSamuelB/schedule-report-payroll/refs/heads/main/version.txt"
-DOWNLOAD_URL_WIN = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll.exe"
-DOWNLOAD_URL_MAC = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll.dmg"
+DOWNLOAD_URL_WIN = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/Schedule Report.exe"
+DOWNLOAD_URL_MAC = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/Schedule Report.dmg"
 
 def get_download_url():
     if sys.platform == "win32":
