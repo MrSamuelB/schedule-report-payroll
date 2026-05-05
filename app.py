@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Image as RLImage, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # ── Version ───────────────────────────────────────────────
@@ -22,7 +22,9 @@ UPDATE_URL = "https://github.com/MrSamuelB/schedule-report-payroll/releases/late
 # ── Rules ─────────────────────────────────────────────────
 COLUMNS_TO_DELETE = [
     "medical record number", "branch name", "phone", "task type",
-    "address", "city", "state", "zip code", "employee id"
+    "address", "city", "state", "zip code", "employee id",
+    "time in", "time out", "documentation time", "travel time",
+    "insurance", "productivity units"
 ]
 
 TASK_NAMES_TO_DELETE = [
@@ -37,7 +39,6 @@ TASK_NAMES_TO_DELETE = [
     "rocdocs", "soc email", "transfer summary", "wound company ovn"
 ]
 
-STATUS_DELETE = "submitted with signature (mv)"
 STATUS_HIGHLIGHT = ["not started", "saved"]
 
 RED_FONT = Font(color="FF0000")
@@ -112,24 +113,26 @@ def process_data(ws):
             for col_idx, value in enumerate(row_data, start=1):
                 ws.cell(row=row_idx, column=col_idx, value=value)
 
-    # Step 4: Delete rows where Task Name matches list
+# Step 4: Delete rows where Task Name matches list or contains "order"
     task_name_idx = get_col_index(ws, "Task Name")
     if task_name_idx:
         rows_to_delete = []
         for row in ws.iter_rows(min_row=2):
             cell_value = str(row[task_name_idx - 1].value or "").strip().lower()
-            if cell_value in TASK_NAMES_TO_DELETE:
+            if cell_value in TASK_NAMES_TO_DELETE or "order" in cell_value:
                 rows_to_delete.append(row[0].row)
         for row_idx in sorted(rows_to_delete, reverse=True):
             ws.delete_rows(row_idx)
 
     # Step 5: Handle Status column
+    # - Delete rows containing "MV" anywhere in status
+    # - Red text for "Not Started" or "Saved" (never delete these)
     status_idx = get_col_index(ws, "Status")
     if status_idx:
         rows_to_delete = []
         for row in ws.iter_rows(min_row=2):
             cell_value = str(row[status_idx - 1].value or "").strip().lower()
-            if cell_value == STATUS_DELETE:
+            if "mv" in cell_value:
                 rows_to_delete.append(row[0].row)
             elif cell_value in STATUS_HIGHLIGHT:
                 for cell in row:
@@ -141,7 +144,7 @@ def process_data(ws):
     return ws
 
 # ── PDF generation ────────────────────────────────────────
-def generate_pdf(ws, save_path, is_debug=False):
+def generate_pdf(ws, save_path):
     pagesize = letter
     page_width, page_height = pagesize
     margin = 0.5 * inch
@@ -209,7 +212,7 @@ def generate_pdf(ws, save_path, is_debug=False):
 
     # Build table rows
     table_data = [[Paragraph(h, header_style) for h in headers]]
-    for row_idx, row in enumerate(data_rows, start=1):
+    for row in data_rows:
         is_red = False
         if status_col_idx is not None:
             val = str(row[status_col_idx] or "").strip().lower()
@@ -262,15 +265,6 @@ def generate_pdf(ws, save_path, is_debug=False):
 
     elements.append(Spacer(1, 0.05*inch))
     elements.append(Paragraph("Schedule Report for Payroll", title_style))
-
-    if is_debug:
-        debug_style = ParagraphStyle(
-            "debug", fontName="Helvetica-Bold", fontSize=10,
-            leading=14, textColor=colors.red, alignment=TA_CENTER
-        )
-        elements.append(Spacer(1, 0.05*inch))
-        elements.append(Paragraph("DEBUG VERSION — includes deleted rows", debug_style))
-
     elements.append(Spacer(1, 0.15*inch))
     elements.append(table)
     elements.append(Spacer(1, 0.2*inch))
@@ -308,36 +302,24 @@ def upload_file():
     )
     app.update()
 
-    # Debug PDF (before processing)
-    debug_pdf_path = filedialog.asksaveasfilename(
-        title="Save DEBUG PDF as",
-        defaultextension=".pdf",
-        filetypes=[("PDF files", "*.pdf")],
-        initialfile="debug_report.pdf"
-    )
-    if debug_pdf_path:
-        status_label.configure(text="Generating debug PDF...")
-        app.update()
-        generate_pdf(ws, debug_pdf_path, is_debug=True)
-
     # Apply all rules
     status_label.configure(text="Applying rules...")
     app.update()
     ws = process_data(ws)
 
-    # Clean PDF
+    # Save PDF
     clean_pdf_path = filedialog.asksaveasfilename(
-        title="Save clean PDF as",
+        title="Save PDF as",
         defaultextension=".pdf",
         filetypes=[("PDF files", "*.pdf")],
         initialfile="schedule_report.pdf"
     )
     if clean_pdf_path:
-        status_label.configure(text="Generating clean PDF...")
+        status_label.configure(text="Generating PDF...")
         app.update()
-        generate_pdf(ws, clean_pdf_path, is_debug=False)
+        generate_pdf(ws, clean_pdf_path)
 
-    # Excel file
+    # Save Excel
     excel_path = filedialog.asksaveasfilename(
         title="Save Excel file as",
         defaultextension=".xlsx",
@@ -358,7 +340,6 @@ app = ctk.CTk()
 app.title("Schedule Report For Payroll")
 app.geometry("800x600")
 
-# Logo on main window
 if os.path.exists(LOGO_PATH):
     pil_image = PILImage.open(LOGO_PATH)
     logo_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(120, 120))
