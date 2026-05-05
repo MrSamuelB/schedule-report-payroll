@@ -22,10 +22,10 @@ jobs:
 
     - name: Build EXE
       run: |
-        pyinstaller --windowed --noconsole --add-data "Logo.png;." --icon "Logo.png" --name "ScheduleReportForPayroll" app.py
+        pyinstaller --onefile --windowed --noconsole --add-data "Logo.png;." --name "ScheduleReportForPayroll" app.py
 
     - name: Upload EXE
       uses: actions/upload-artifact@v4
       with:
         name: ScheduleReportForPayroll-Windows
-        path: dist/ScheduleReportForPayroll/
+        path: dist/ScheduleReportForPayroll.exe
