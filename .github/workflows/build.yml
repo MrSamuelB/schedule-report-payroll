@@ -28,7 +28,7 @@ jobs:
     - name: Zip EXE
       run: |
         cd dist
-        Compress-Archive -Path ScheduleReportForPayroll.exe -DestinationPath ..\ScheduleReportForPayroll-Windows.zip
+        Compress-Archive -Path "Schedule Report.exe" -DestinationPath ..\ScheduleReportForPayroll-Windows.zip
 
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
@@ -78,7 +78,7 @@ jobs:
     - name: Zip Mac app
       run: |
         cd dist
-        zip -r ../ScheduleReportForPayroll-Mac.zip ScheduleReportForPayroll.app
+        zip -r ../ScheduleReportForPayroll-Mac.zip "Schedule Report.app"
 
     - name: Upload Mac artifact
       uses: actions/upload-artifact@v4
