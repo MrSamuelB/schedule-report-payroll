@@ -154,13 +154,20 @@ start "" "{current_exe}"
                     app_name = os.path.basename(new_app_path)
                     current_app = f"/Applications/{app_name}"
 
-                # Write a shell script to replace the app after it quits
+                # Stage new app in home directory first
+                staged = os.path.expanduser("~/Schedule Report Update.app")
+                if os.path.exists(staged):
+                    shutil.rmtree(staged)
+                shutil.copytree(new_app_path, staged)
+
+                # Write shell script to replace after quit
                 script = os.path.join(tmp_dir, "update.sh")
                 with open(script, "w") as f:
                     f.write(f"""#!/bin/bash
 sleep 2
 rm -rf "{current_app}"
-cp -R "{new_app_path}" "{current_app}"
+cp -R "{staged}" "{current_app}"
+rm -rf "{staged}"
 open "{current_app}"
 rm -- "$0"
 """)
