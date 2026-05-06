@@ -83,21 +83,9 @@ def resource_path(filename):
 LOGO_PATH = resource_path("Logo.png")
 
 # ── Auto-update ───────────────────────────────────────────
-def get_current_app_path():
-    if sys.platform == "win32":
-        return sys.executable
-    else:
-        # On Mac, go up from the executable to the .app bundle
-        exe = sys.executable
-        if ".app" in exe:
-            parts = exe.split(".app")
-            return parts[0] + ".app"
-        return exe
-
 def download_and_relaunch():
     try:
         download_url = get_download_url()
-
         tmp_dir = tempfile.mkdtemp()
         zip_path = os.path.join(tmp_dir, "update.zip")
 
@@ -147,32 +135,16 @@ start "" "{current_exe}"
                     break
 
             if new_app_path:
-                exe = sys.executable
-                if ".app" in exe:
-                    current_app = exe.split(".app")[0] + ".app"
-                else:
-                    app_name = os.path.basename(new_app_path)
-                    current_app = f"/Applications/{app_name}"
-
-                # Stage new app in home directory first
-                staged = os.path.expanduser("~/Schedule Report Update.app")
+                app_name = os.path.basename(new_app_path)
+                # Copy new app to Downloads folder
+                downloads = os.path.expanduser("~/Downloads")
+                staged = os.path.join(downloads, app_name)
                 if os.path.exists(staged):
                     shutil.rmtree(staged)
                 shutil.copytree(new_app_path, staged)
 
-                # Write shell script to replace after quit
-                script = os.path.join(tmp_dir, "update.sh")
-                with open(script, "w") as f:
-                    f.write(f"""#!/bin/bash
-sleep 2
-rm -rf "{current_app}"
-cp -R "{staged}" "{current_app}"
-rm -rf "{staged}"
-open "{current_app}"
-rm -- "$0"
-""")
-                os.chmod(script, 0o755)
-                subprocess.Popen(["bash", script])
+                # Open the new app from Downloads
+                subprocess.Popen(["open", staged])
                 app.after(0, app.quit)
 
     except Exception as e:
@@ -190,7 +162,7 @@ def check_for_updates():
             def show_update_popup():
                 update_win = ctk.CTkToplevel(app)
                 update_win.title("Update Available")
-                update_win.geometry("400x200")
+                update_win.geometry("400x220")
                 update_win.resizable(False, False)
                 update_win.grab_set()
 
