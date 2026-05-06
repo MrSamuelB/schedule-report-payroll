@@ -12,6 +12,7 @@ import certifi
 import zipfile
 import shutil
 import tempfile
+import time
 import requests
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
@@ -89,7 +90,7 @@ def download_and_relaunch():
         tmp_dir = tempfile.mkdtemp()
         zip_path = os.path.join(tmp_dir, "update.zip")
 
-        app.after(0, lambda: status_label.configure(text="Downloading update..."))
+        app.after(0, lambda: status_label.configure(text="Debug: Starting download..."))
 
         response = requests.get(download_url, stream=True, verify=certifi.where())
         response.raise_for_status()
@@ -99,12 +100,16 @@ def download_and_relaunch():
                 if chunk:
                     f.write(chunk)
 
-        app.after(0, lambda: status_label.configure(text="Installing update..."))
+        app.after(0, lambda: status_label.configure(text="Debug: Download complete. Extracting..."))
+        time.sleep(1)
 
         extract_dir = os.path.join(tmp_dir, "extracted")
         os.makedirs(extract_dir, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(extract_dir)
+
+        app.after(0, lambda: status_label.configure(text=f"Debug: Extracted. Contents: {os.listdir(extract_dir)}"))
+        time.sleep(2)
 
         if sys.platform == "win32":
             new_exe = None
@@ -134,23 +139,40 @@ start "" "{current_exe}"
                     new_app_path = os.path.join(extract_dir, item)
                     break
 
-            if new_app_path:
-                app_name = os.path.basename(new_app_path)
-                # Copy new app to Downloads folder
-                downloads = os.path.expanduser("~/Downloads")
-                staged = os.path.join(downloads, app_name)
+            if not new_app_path:
+                app.after(0, lambda: status_label.configure(text="Debug: No .app found in zip"))
+                return
+
+            app.after(0, lambda: status_label.configure(text=f"Debug: Found app: {os.path.basename(new_app_path)}"))
+            time.sleep(1)
+
+            app_name = os.path.basename(new_app_path)
+            downloads = os.path.expanduser("~/Downloads")
+            staged = os.path.join(downloads, app_name)
+
+            app.after(0, lambda: status_label.configure(text=f"Debug: Copying to Downloads..."))
+            time.sleep(1)
+
+            try:
                 if os.path.exists(staged):
                     shutil.rmtree(staged)
                 shutil.copytree(new_app_path, staged)
+                app.after(0, lambda: status_label.configure(text="Debug: Copy done! Opening new app..."))
+                time.sleep(1)
+            except Exception as copy_err:
+                app.after(0, lambda: status_label.configure(text=f"Debug copy error: {str(copy_err)}"))
+                return
 
-                # Open the new app from Downloads
+            try:
                 subprocess.Popen(["open", staged])
+                app.after(0, lambda: status_label.configure(text="Debug: Open called! Quitting old app..."))
+                time.sleep(1)
                 app.after(0, app.quit)
+            except Exception as open_err:
+                app.after(0, lambda: status_label.configure(text=f"Debug open error: {str(open_err)}"))
 
     except Exception as e:
-        app.after(0, lambda: status_label.configure(
-            text=f"Update failed: {str(e)}"
-        ))
+        app.after(0, lambda: status_label.configure(text=f"Update failed: {str(e)}"))
 
 def check_for_updates():
     try:
@@ -181,7 +203,7 @@ def check_for_updates():
 
                 def do_update():
                     update_win.destroy()
-                    status_label.configure(text="Downloading update, please wait...")
+                    status_label.configure(text="Starting update...")
                     app.update()
                     threading.Thread(target=download_and_relaunch, daemon=True).start()
 
