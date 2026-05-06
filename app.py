@@ -143,33 +143,57 @@ start "" "{current_exe}"
                 app.after(0, lambda: status_label.configure(text="Debug: No .app found in zip"))
                 return
 
-            app.after(0, lambda: status_label.configure(text=f"Debug: Found app: {os.path.basename(new_app_path)}"))
-            time.sleep(1)
-
             app_name = os.path.basename(new_app_path)
             downloads = os.path.expanduser("~/Downloads")
             staged = os.path.join(downloads, app_name)
 
-            app.after(0, lambda: status_label.configure(text=f"Debug: Copying to Downloads..."))
+            app.after(0, lambda: status_label.configure(text="Debug: Copying to Downloads..."))
             time.sleep(1)
 
             try:
                 if os.path.exists(staged):
                     shutil.rmtree(staged)
                 shutil.copytree(new_app_path, staged)
-                app.after(0, lambda: status_label.configure(text="Debug: Copy done! Opening new app..."))
+                app.after(0, lambda: status_label.configure(text="Debug: Copy done!"))
                 time.sleep(1)
             except Exception as copy_err:
                 app.after(0, lambda: status_label.configure(text=f"Debug copy error: {str(copy_err)}"))
                 return
 
-            try:
-                subprocess.Popen(["open", staged])
-                app.after(0, lambda: status_label.configure(text="Debug: Open called! Quitting old app..."))
-                time.sleep(1)
-                app.after(0, app.quit)
-            except Exception as open_err:
-                app.after(0, lambda: status_label.configure(text=f"Debug open error: {str(open_err)}"))
+            # Find where the current app is running from
+            exe = sys.executable
+            if ".app" in exe:
+                current_app = exe.split(".app")[0] + ".app"
+            else:
+                current_app = None
+
+            app.after(0, lambda: status_label.configure(text=f"Debug: Current app at: {current_app}"))
+            time.sleep(2)
+
+            # Write script to replace current app after quit and relaunch
+            script = os.path.join(tmp_dir, "update.sh")
+            with open(script, "w") as f:
+                if current_app:
+                    f.write(f"""#!/bin/bash
+sleep 3
+rm -rf "{current_app}"
+cp -R "{staged}" "{current_app}"
+rm -rf "{staged}"
+open "{current_app}"
+rm -- "$0"
+""")
+                else:
+                    f.write(f"""#!/bin/bash
+sleep 3
+open "{staged}"
+rm -- "$0"
+""")
+            os.chmod(script, 0o755)
+
+            app.after(0, lambda: status_label.configure(text="Debug: Launching update script and quitting..."))
+            time.sleep(1)
+            subprocess.Popen(["bash", script])
+            app.after(0, app.quit)
 
     except Exception as e:
         app.after(0, lambda: status_label.configure(text=f"Update failed: {str(e)}"))
@@ -239,7 +263,6 @@ def move_column_to(ws, from_idx, to_idx):
 
 # ── Process data ──────────────────────────────────────────
 def process_data(ws):
-    # Step 0: Sort by Target Date chronologically
     target_date_idx = get_col_index(ws, "Target Date")
     if target_date_idx:
         data_rows = [list(row) for row in ws.iter_rows(min_row=2, values_only=True)]
@@ -254,7 +277,6 @@ def process_data(ws):
             for col_idx, value in enumerate(row_data, start=1):
                 ws.cell(row=row_idx, column=col_idx, value=value)
 
-    # Step 1: Delete specified columns
     cols_to_remove = []
     for col_idx, cell in enumerate(ws[1], start=1):
         if cell.value and str(cell.value).strip().lower() in COLUMNS_TO_DELETE:
@@ -262,7 +284,6 @@ def process_data(ws):
     for col_idx in sorted(cols_to_remove, reverse=True):
         ws.delete_cols(col_idx)
 
-    # Step 2: Move Provider Last → col B, Provider First → col C
     provider_last_idx = get_col_index(ws, "Provider Last")
     if provider_last_idx:
         move_column_to(ws, provider_last_idx, 2)
@@ -270,7 +291,6 @@ def process_data(ws):
     if provider_first_idx:
         move_column_to(ws, provider_first_idx, 3)
 
-    # Step 3: Sort by Task Name alphabetically
     task_name_idx = get_col_index(ws, "Task Name")
     if task_name_idx:
         data_rows = [list(row) for row in ws.iter_rows(min_row=2, values_only=True)]
@@ -279,7 +299,6 @@ def process_data(ws):
             for col_idx, value in enumerate(row_data, start=1):
                 ws.cell(row=row_idx, column=col_idx, value=value)
 
-    # Step 4: Delete rows where Task Name matches list, contains "order", or "discharge summary"
     task_name_idx = get_col_index(ws, "Task Name")
     if task_name_idx:
         rows_to_delete = []
@@ -290,7 +309,6 @@ def process_data(ws):
         for row_idx in sorted(rows_to_delete, reverse=True):
             ws.delete_rows(row_idx)
 
-    # Step 5a: Delete rows where Provider Last is "Williams" or "Morales"
     provider_last_idx = get_col_index(ws, "Provider Last")
     if provider_last_idx:
         rows_to_delete = []
@@ -301,7 +319,6 @@ def process_data(ws):
         for row_idx in sorted(rows_to_delete, reverse=True):
             ws.delete_rows(row_idx)
 
-    # Step 5b: Handle Status column
     status_idx = get_col_index(ws, "Status")
     if status_idx:
         rows_to_delete = []
