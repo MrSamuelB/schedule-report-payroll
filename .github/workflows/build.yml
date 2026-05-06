@@ -23,7 +23,7 @@ jobs:
     - name: Build EXE
       run: |
         $dndPath = python -c "import tkinterdnd2, os; print(os.path.dirname(tkinterdnd2.__file__))"
-        pyinstaller --onefile --windowed --noconsole --add-data "Logo.png;." --add-data "$dndPath;tkinterdnd2" --icon "Logo.png" --name "ScheduleReportForPayroll" app.py
+        pyinstaller --onefile --windowed --noconsole --add-data "Logo.png;." --add-data "$dndPath;tkinterdnd2" --icon "Logo.png" --name "Schedule Report" app.py
 
     - name: Zip EXE
       run: |
@@ -73,7 +73,7 @@ jobs:
           --add-data "$DND_PATH:tkinterdnd2" \
           --osx-bundle-identifier "com.legacyhomehealth.schedulereport" \
           --icon "Logo.icns" \
-          --name "ScheduleReportForPayroll" app.py
+          --name "Schedule Report" app.py
 
     - name: Zip Mac app
       run: |
