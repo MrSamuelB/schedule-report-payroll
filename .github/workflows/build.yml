@@ -18,18 +18,23 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install customtkinter openpyxl reportlab pillow pyinstaller tkinterdnd2
+        pip install customtkinter openpyxl reportlab pillow pyinstaller tkinterdnd2 requests certifi
 
     - name: Build EXE
       run: |
         $dndPath = python -c "import tkinterdnd2, os; print(os.path.dirname(tkinterdnd2.__file__))"
         pyinstaller --onefile --windowed --noconsole --add-data "Logo.png;." --add-data "$dndPath;tkinterdnd2" --icon "Logo.png" --name "ScheduleReportForPayroll" app.py
 
-    - name: Upload EXE artifact
+    - name: Zip EXE
+      run: |
+        cd dist
+        Compress-Archive -Path ScheduleReportForPayroll.exe -DestinationPath ..\ScheduleReportForPayroll-Windows.zip
+
+    - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
       with:
         name: ScheduleReportForPayroll-Windows
-        path: dist/ScheduleReportForPayroll.exe
+        path: ScheduleReportForPayroll-Windows.zip
 
   build-mac:
     runs-on: macos-latest
@@ -44,7 +49,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install customtkinter openpyxl reportlab pillow pyinstaller tkinterdnd2
+        pip install customtkinter openpyxl reportlab pillow pyinstaller tkinterdnd2 requests certifi
 
     - name: Create Mac icon
       run: |
@@ -70,15 +75,13 @@ jobs:
           --icon "Logo.icns" \
           --name "ScheduleReportForPayroll" app.py
 
-    - name: Create DMG
+    - name: Zip Mac app
       run: |
-        hdiutil create -volname "ScheduleReportForPayroll" \
-          -srcfolder "dist/ScheduleReportForPayroll.app" \
-          -ov -format UDZO \
-          "ScheduleReportForPayroll.dmg"
+        cd dist
+        zip -r ../ScheduleReportForPayroll-Mac.zip ScheduleReportForPayroll.app
 
-    - name: Upload DMG artifact
+    - name: Upload Mac artifact
       uses: actions/upload-artifact@v4
       with:
         name: ScheduleReportForPayroll-Mac
-        path: ScheduleReportForPayroll.dmg
+        path: ScheduleReportForPayroll-Mac.zip
