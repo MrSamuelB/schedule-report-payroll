@@ -147,21 +147,25 @@ start "" "{current_exe}"
                     break
 
             if new_app_path:
-                # Find where current app is installed
                 exe = sys.executable
                 if ".app" in exe:
                     current_app = exe.split(".app")[0] + ".app"
                 else:
-                    # Fallback - install to Applications
                     app_name = os.path.basename(new_app_path)
                     current_app = f"/Applications/{app_name}"
 
-                dst = current_app
-                if os.path.exists(dst):
-                    shutil.rmtree(dst)
-                shutil.copytree(new_app_path, dst)
-
-                subprocess.Popen(["open", dst])
+                # Write a shell script to replace the app after it quits
+                script = os.path.join(tmp_dir, "update.sh")
+                with open(script, "w") as f:
+                    f.write(f"""#!/bin/bash
+sleep 2
+rm -rf "{current_app}"
+cp -R "{new_app_path}" "{current_app}"
+open "{current_app}"
+rm -- "$0"
+""")
+                os.chmod(script, 0o755)
+                subprocess.Popen(["bash", script])
                 app.after(0, app.quit)
 
     except Exception as e:
