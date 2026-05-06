@@ -9,6 +9,10 @@ import os
 import sys
 import ssl
 import certifi
+import zipfile
+import shutil
+import tempfile
+import requests
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -23,10 +27,10 @@ except Exception:
     DND_AVAILABLE = False
 
 # ── Version ───────────────────────────────────────────────
-CURRENT_VERSION = "1.0.8"
+CURRENT_VERSION = "1.0.9"
 VERSION_URL = "https://raw.githubusercontent.com/MrSamuelB/schedule-report-payroll/refs/heads/main/version.txt"
-DOWNLOAD_URL_WIN = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll.exe"
-DOWNLOAD_URL_MAC = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll.dmg"
+DOWNLOAD_URL_WIN = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll-Windows.zip"
+DOWNLOAD_URL_MAC = "https://github.com/MrSamuelB/schedule-report-payroll/releases/latest/download/ScheduleReportForPayroll-Mac.zip"
 
 def get_download_url():
     if sys.platform == "win32":
@@ -79,55 +83,90 @@ def resource_path(filename):
 LOGO_PATH = resource_path("Logo.png")
 
 # ── Auto-update ───────────────────────────────────────────
+def get_current_app_path():
+    if sys.platform == "win32":
+        return sys.executable
+    else:
+        # On Mac, go up from the executable to the .app bundle
+        exe = sys.executable
+        if ".app" in exe:
+            parts = exe.split(".app")
+            return parts[0] + ".app"
+        return exe
+
 def download_and_relaunch():
     try:
         download_url = get_download_url()
-        current_exe = sys.executable
-        ctx = get_ssl_context()
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-        urllib.request.install_opener(opener)
+
+        tmp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(tmp_dir, "update.zip")
+
+        app.after(0, lambda: status_label.configure(text="Downloading update..."))
+
+        response = requests.get(download_url, stream=True, verify=certifi.where())
+        response.raise_for_status()
+
+        with open(zip_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+        app.after(0, lambda: status_label.configure(text="Installing update..."))
+
+        extract_dir = os.path.join(tmp_dir, "extracted")
+        os.makedirs(extract_dir, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(extract_dir)
 
         if sys.platform == "win32":
-            new_exe = current_exe + ".new"
-            urllib.request.urlretrieve(download_url, new_exe)
-            batch = os.path.join(os.path.dirname(current_exe), "update.bat")
-            with open(batch, "w") as f:
-                f.write(f"""@echo off
+            new_exe = None
+            for root, dirs, files in os.walk(extract_dir):
+                for f in files:
+                    if f.endswith(".exe"):
+                        new_exe = os.path.join(root, f)
+                        break
+            if new_exe:
+                current_exe = sys.executable
+                batch = os.path.join(tmp_dir, "update.bat")
+                with open(batch, "w") as f:
+                    f.write(f"""@echo off
 timeout /t 2 /nobreak
-move /y "{new_exe}" "{current_exe}"
+copy /y "{new_exe}" "{current_exe}"
 start "" "{current_exe}"
-del "%~f0"
 """)
-            import subprocess
-            subprocess.Popen(["cmd", "/c", batch], creationflags=0x08000000)
-            app.quit()
+                import subprocess
+                subprocess.Popen(["cmd", "/c", batch], creationflags=0x08000000)
+                app.after(0, app.quit)
 
         else:
             import subprocess
-            dmg_path = os.path.expanduser("~/Downloads/ScheduleReport_update.dmg")
-            urllib.request.urlretrieve(download_url, dmg_path)
-            result = subprocess.run(
-                ["hdiutil", "attach", dmg_path, "-nobrowse", "-quiet"],
-                capture_output=True, text=True
-            )
-            mount_point = None
-            for line in result.stdout.splitlines():
-                if "Schedule Report" in line:
-                    parts = line.split("\t")
-                    if len(parts) >= 3:
-                        mount_point = parts[-1].strip()
-                        break
-            if mount_point:
-                app_src = os.path.join(mount_point, "Schedule Report.app")
-                app_dst = "/Applications/Schedule Report.app"
-                subprocess.run(["cp", "-R", app_src, app_dst])
-                subprocess.run(["hdiutil", "detach", mount_point, "-quiet"])
-                subprocess.Popen(["open", app_dst])
-                app.quit()
+            new_app_path = None
+            for item in os.listdir(extract_dir):
+                if item.endswith(".app"):
+                    new_app_path = os.path.join(extract_dir, item)
+                    break
 
-    except Exception:
+            if new_app_path:
+                # Find where current app is installed
+                exe = sys.executable
+                if ".app" in exe:
+                    current_app = exe.split(".app")[0] + ".app"
+                else:
+                    # Fallback - install to Applications
+                    app_name = os.path.basename(new_app_path)
+                    current_app = f"/Applications/{app_name}"
+
+                dst = current_app
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(new_app_path, dst)
+
+                subprocess.Popen(["open", dst])
+                app.after(0, app.quit)
+
+    except Exception as e:
         app.after(0, lambda: status_label.configure(
-            text="Update failed. Please download manually."
+            text=f"Update failed: {str(e)}"
         ))
 
 def check_for_updates():
@@ -152,7 +191,7 @@ def check_for_updates():
 
                 ctk.CTkLabel(
                     update_win,
-                    text=f"Version {latest_version} is ready to download.\nClick below to update.",
+                    text=f"Version {latest_version} is ready.\nClick below to update automatically.",
                     font=ctk.CTkFont(size=13),
                     text_color="gray"
                 ).pack(pady=5)
@@ -165,7 +204,7 @@ def check_for_updates():
 
                 ctk.CTkButton(
                     update_win,
-                    text="Continue to Download",
+                    text="Update Now",
                     font=ctk.CTkFont(size=14),
                     height=45,
                     width=220,
@@ -195,7 +234,7 @@ def move_column_to(ws, from_idx, to_idx):
 
 # ── Process data ──────────────────────────────────────────
 def process_data(ws):
-    # Step 0: Sort by Target Date (column A) chronologically
+    # Step 0: Sort by Target Date chronologically
     target_date_idx = get_col_index(ws, "Target Date")
     if target_date_idx:
         data_rows = [list(row) for row in ws.iter_rows(min_row=2, values_only=True)]
@@ -235,7 +274,7 @@ def process_data(ws):
             for col_idx, value in enumerate(row_data, start=1):
                 ws.cell(row=row_idx, column=col_idx, value=value)
 
-    # Step 4: Delete rows where Task Name matches list, contains "order", or contains "discharge summary"
+    # Step 4: Delete rows where Task Name matches list, contains "order", or "discharge summary"
     task_name_idx = get_col_index(ws, "Task Name")
     if task_name_idx:
         rows_to_delete = []
@@ -288,14 +327,12 @@ def generate_pdf(ws, save_path, date_range=""):
     headers = [str(c) if c is not None else "" for c in all_rows[0]]
     data_rows = all_rows[1:]
 
-    # Find status column
     status_col_idx = None
     for i, h in enumerate(headers):
         if h.strip().lower() == "status":
             status_col_idx = i
             break
 
-    # Calculate column widths — Task Name gets as much space as possible
     col_count = len(headers)
     task_col_idx = None
     for i, h in enumerate(headers):
@@ -311,40 +348,15 @@ def generate_pdf(ws, save_path, date_range=""):
     else:
         col_widths = [usable_width / col_count] * col_count
 
-    # Styles
-    normal_style = ParagraphStyle(
-        "cell", fontName="Helvetica", fontSize=8, leading=11, wordWrap="LTR"
-    )
-    red_style = ParagraphStyle(
-        "red_cell", fontName="Helvetica", fontSize=8, leading=11,
-        wordWrap="LTR", textColor=colors.red
-    )
-    header_style = ParagraphStyle(
-        "header", fontName="Helvetica-Bold", fontSize=8, leading=11,
-        textColor=colors.white, wordWrap="LTR"
-    )
-    title_style = ParagraphStyle(
-        "title", fontName="Helvetica-Bold", fontSize=14,
-        leading=20, alignment=TA_CENTER
-    )
-    summary_label_style = ParagraphStyle(
-        "sum_label", fontName="Helvetica-Bold", fontSize=10,
-        leading=14, alignment=TA_LEFT
-    )
-    summary_value_style = ParagraphStyle(
-        "sum_value", fontName="Helvetica", fontSize=10,
-        leading=14, alignment=TA_LEFT
-    )
-    summary_red_style = ParagraphStyle(
-        "sum_red", fontName="Helvetica-Bold", fontSize=10,
-        leading=14, alignment=TA_LEFT, textColor=colors.red
-    )
-    summary_billable_style = ParagraphStyle(
-        "sum_billable", fontName="Helvetica-Bold", fontSize=10,
-        leading=14, alignment=TA_LEFT, textColor=colors.HexColor("#1a5276")
-    )
+    normal_style = ParagraphStyle("cell", fontName="Helvetica", fontSize=8, leading=11, wordWrap="LTR")
+    red_style = ParagraphStyle("red_cell", fontName="Helvetica", fontSize=8, leading=11, wordWrap="LTR", textColor=colors.red)
+    header_style = ParagraphStyle("header", fontName="Helvetica-Bold", fontSize=8, leading=11, textColor=colors.white, wordWrap="LTR")
+    title_style = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=14, leading=20, alignment=TA_CENTER)
+    summary_label_style = ParagraphStyle("sum_label", fontName="Helvetica-Bold", fontSize=10, leading=14, alignment=TA_LEFT)
+    summary_value_style = ParagraphStyle("sum_value", fontName="Helvetica", fontSize=10, leading=14, alignment=TA_LEFT)
+    summary_red_style = ParagraphStyle("sum_red", fontName="Helvetica-Bold", fontSize=10, leading=14, alignment=TA_LEFT, textColor=colors.red)
+    summary_billable_style = ParagraphStyle("sum_billable", fontName="Helvetica-Bold", fontSize=10, leading=14, alignment=TA_LEFT, textColor=colors.HexColor("#1a5276"))
 
-    # Count visits
     total_visits = len(data_rows)
     red_visits = 0
     if status_col_idx is not None:
@@ -354,7 +366,6 @@ def generate_pdf(ws, save_path, date_range=""):
                 red_visits += 1
     billable_visits = total_visits - red_visits
 
-    # Build table rows
     table_data = [[Paragraph(h, header_style) for h in headers]]
     for row in data_rows:
         is_red = False
@@ -366,7 +377,6 @@ def generate_pdf(ws, save_path, date_range=""):
         cells = [Paragraph(str(c) if c is not None else "", style) for c in row]
         table_data.append(cells)
 
-    # Table styling
     table_style_cmds = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a5276")),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
@@ -375,21 +385,16 @@ def generate_pdf(ws, save_path, date_range=""):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-         [colors.white, colors.HexColor("#eaf0fb")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eaf0fb")]),
     ]
 
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle(table_style_cmds))
 
-    # Summary table
     summary_data = [
-        [Paragraph("Total Visits:", summary_label_style),
-         Paragraph(str(total_visits), summary_value_style)],
-        [Paragraph("Red Visits (Not Started / Saved):", summary_red_style),
-         Paragraph(str(red_visits), summary_red_style)],
-        [Paragraph("Billable Visits:", summary_billable_style),
-         Paragraph(str(billable_visits), summary_billable_style)],
+        [Paragraph("Total Visits:", summary_label_style), Paragraph(str(total_visits), summary_value_style)],
+        [Paragraph("Red Visits (Not Started / Saved):", summary_red_style), Paragraph(str(red_visits), summary_red_style)],
+        [Paragraph("Billable Visits:", summary_billable_style), Paragraph(str(billable_visits), summary_billable_style)],
     ]
     summary_table = Table(summary_data, colWidths=[3*inch, 1*inch])
     summary_table.setStyle(TableStyle([
@@ -400,13 +405,10 @@ def generate_pdf(ws, save_path, date_range=""):
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]))
 
-    # Build elements
     elements = []
-
     if os.path.exists(LOGO_PATH):
         logo = RLImage(LOGO_PATH, width=0.8*inch, height=0.8*inch)
         elements.append(logo)
-
     elements.append(Spacer(1, 0.05*inch))
     title_text = "Schedule Report for Payroll"
     if date_range:
@@ -417,14 +419,7 @@ def generate_pdf(ws, save_path, date_range=""):
     elements.append(Spacer(1, 0.2*inch))
     elements.append(summary_table)
 
-    doc = SimpleDocTemplate(
-        save_path,
-        pagesize=pagesize,
-        leftMargin=margin,
-        rightMargin=margin,
-        topMargin=margin,
-        bottomMargin=margin
-    )
+    doc = SimpleDocTemplate(save_path, pagesize=pagesize, leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin)
     doc.build(elements)
 
 # ── Upload & process ──────────────────────────────────────
@@ -437,16 +432,13 @@ def process_and_export(file_path):
 
     row_count = ws.max_row - 1
     col_count = ws.max_column
-    status_label.configure(
-        text=f"Loaded: {row_count} rows, {col_count} columns. Processing..."
-    )
+    status_label.configure(text=f"Loaded: {row_count} rows, {col_count} columns. Processing...")
     app.update()
 
     status_label.configure(text="Applying rules...")
     app.update()
     ws = process_data(ws)
 
-    # Get date range from Target Date column for PDF title and filename
     dates = []
     target_date_idx = get_col_index(ws, "Target Date")
     if target_date_idx:
@@ -463,7 +455,6 @@ def process_and_export(file_path):
         date_range = ""
         filename = "schedule_report"
 
-    # Save PDF
     clean_pdf_path = filedialog.asksaveasfilename(
         title="Save PDF as",
         defaultextension=".pdf",
@@ -475,7 +466,6 @@ def process_and_export(file_path):
         app.update()
         generate_pdf(ws, clean_pdf_path, date_range)
 
-    # Save Excel
     excel_path = filedialog.asksaveasfilename(
         title="Save Excel file as",
         defaultextension=".xlsx",
@@ -487,9 +477,7 @@ def process_and_export(file_path):
         app.update()
         workbook.save(excel_path)
 
-    status_label.configure(
-        text=f"All done! Rows in final report: {ws.max_row - 1}"
-    )
+    status_label.configure(text=f"All done! Rows in final report: {ws.max_row - 1}")
 
 def upload_file():
     file_path = filedialog.askopenfilename(
@@ -532,36 +520,16 @@ if os.path.exists(LOGO_PATH):
     logo_label = ctk.CTkLabel(app, image=logo_image, text="")
     logo_label.pack(pady=(20, 5))
 
-title_label = ctk.CTkLabel(
-    app,
-    text="Schedule Report For Payroll",
-    font=ctk.CTkFont(size=24, weight="bold")
-)
+title_label = ctk.CTkLabel(app, text="Schedule Report For Payroll", font=ctk.CTkFont(size=24, weight="bold"))
 title_label.pack(pady=(5, 0))
 
-subtitle_label = ctk.CTkLabel(
-    app,
-    text="Upload a schedule, apply rules, and export a PDF and Excel file.",
-    font=ctk.CTkFont(size=14)
-)
+subtitle_label = ctk.CTkLabel(app, text="Upload a schedule, apply rules, and export a PDF and Excel file.", font=ctk.CTkFont(size=14))
 subtitle_label.pack(pady=5)
 
-version_label = ctk.CTkLabel(
-    app,
-    text=f"Version {CURRENT_VERSION}",
-    font=ctk.CTkFont(size=11),
-    text_color="gray"
-)
+version_label = ctk.CTkLabel(app, text=f"Version {CURRENT_VERSION}", font=ctk.CTkFont(size=11), text_color="gray")
 version_label.pack(pady=0)
 
-upload_btn = ctk.CTkButton(
-    app,
-    text="Upload Schedule",
-    font=ctk.CTkFont(size=16),
-    height=50,
-    width=250,
-    command=upload_file
-)
+upload_btn = ctk.CTkButton(app, text="Upload Schedule", font=ctk.CTkFont(size=16), height=50, width=250, command=upload_file)
 upload_btn.pack(pady=20)
 
 drop_zone = ctk.CTkLabel(
@@ -582,12 +550,7 @@ if DND_AVAILABLE:
     drop_zone.dnd_bind('<<DropLeave>>', on_drag_leave)
     drop_zone.dnd_bind('<<Drop>>', on_drop)
 
-status_label = ctk.CTkLabel(
-    app,
-    text="No file loaded yet.",
-    font=ctk.CTkFont(size=13),
-    text_color="gray"
-)
+status_label = ctk.CTkLabel(app, text="No file loaded yet.", font=ctk.CTkFont(size=13), text_color="gray")
 status_label.pack(pady=5)
 
 threading.Thread(target=check_for_updates, daemon=True).start()
